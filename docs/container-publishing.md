@@ -1,5 +1,16 @@
 # Container publishing
 
+## Fork testing
+
+On the `test/docker-http` integration branch, pushes also trigger this workflow.
+The image is published as
+`ghcr.io/kquinsland/monarch-mcp-server:test-docker-http`, plus a commit tag.
+This branch combines PRs #142 and #141 for testing before their upstream merge.
+The push trigger is specific to this branch; `latest` is updated only by stable
+releases.
+
+## Upstream setup
+
 The publishing workflow builds the root Dockerfile. Merge the Docker/HTTP work
 in [PR #142](https://github.com/robcerda/monarch-mcp-server/pull/142) before merging
 the automation in [PR #141](https://github.com/robcerda/monarch-mcp-server/pull/141).
