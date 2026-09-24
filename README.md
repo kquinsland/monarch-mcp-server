@@ -251,8 +251,37 @@ docker run --rm -it \
 The login script supports a cookie file for browser-cookie authentication.
 To use it, also mount your cookie file at `/tmp/monarch-cookie.txt:ro` and set `MONARCH_MCP_COOKIE_FILE=/tmp/monarch-cookie.txt` for the login container.
 
-The file must be readable by the container's UID: `10001`.
+The file must be readable by the container's uid `10001`, which conflicts with
+the `chmod 600` advised for the local flow: a 0600 file owned by your host user
+is not readable by uid 10001 inside the container. For the container login,
+either `chown 10001 cookie.txt` and keep it at 0600, or run the login container
+with `--user $(id -u)` so it reads the file as you. Do not widen it to 0644.
+Delete the file once the login has succeeded.
+
 Once saved, the session volume is sufficient for normal server launches.
+
+> [!IMPORTANT]
+> **The session is stored unencrypted in that volume.** This differs from a
+> local install, and the difference is easy to miss.
+>
+> On macOS and Windows the session goes to the system keyring. A container has
+> no keyring backend, so storage falls back to a file. That file is encrypted
+> at rest only on Windows, through DPAPI, so in a Linux container it holds your
+> Monarch session in plaintext. Permissions are as tight as a file can be, mode
+> 0600 inside a 0700 directory owned by uid 10001, but file permissions do not
+> help against anyone who can reach the volume from outside the container.
+>
+> Treat `monarch-session` as a secret. It can be read by root on the Docker
+> host, by any user in the `docker` group, by any other container that mounts
+> the same volume, by `docker cp` and `docker exec`, and by anything that backs
+> up `/var/lib/docker`. A Monarch session grants full read and write access to
+> your accounts and does not expire on its own, so a copy of this volume is a
+> lasting credential. Back it up only to somewhere you would keep a password,
+> and delete the volume with `docker volume rm monarch-session` when you are
+> done with it.
+>
+> The cookie file described below is the same kind of secret. Delete it once
+> the login has succeeded; it is only needed for that one run.
 
 ### Start the HTTP server
 
@@ -328,6 +357,26 @@ Host entries include the port when clients send one; `server.lan:*` allows any p
 Origin entries include the scheme, for example `https://client.example.com`.
 Clients without an Origin header are supported.
 Browser clients may additionally require CORS handling at the reverse proxy.
+
+## Meta Muse
+
+Works great with Meta Muse, Meta's AI assistant, alongside Claude Desktop and
+Claude Code. Muse speaks MCP, so it connects the same way as any other client:
+give it the stdio launch command from the installation section, or point it at
+the Streamable HTTP endpoint if you are running the container.
+
+Using Muse? Ask it to install this server from this repo. Muse can handle the
+install and register the server with itself, but authentication is a step only
+you can do: run login_setup.py once and paste a browser cookie, or enter your
+password and MFA. After that, ask Muse to list your Monarch accounts to confirm
+it is working.
+
+Check out Muse, your personal AI agent. Redeem my code in Settings within 48
+hours of joining and we'll both get 1 billion Muse tokens.
+
+Code: O63W0U
+
+https://muse.ai/join
 
 ## ✨ Features
 
@@ -457,6 +506,7 @@ live tool registry and the functions' signatures, so it does not drift.
 | --------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `add_transaction_tag`             | Add a tag to a transaction, preserving any tags already on it                 | `transaction_id`, `tag_id`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `bulk_categorize_transactions`    | Apply the same category to multiple transactions at once                      | `transaction_ids`, `category_id`, `mark_reviewed`?, `dry_run`?                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `bulk_update_transactions`        | Apply the same edit to many transactions in one request                       | `transaction_ids`, `category_id`?, `merchant_name`?, `notes`?, `goal_id`?, `needs_review`?, `dry_run`?                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `categorize_transaction`          | Assign a category to a transaction                                            | `transaction_id`, `category_id`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `check_auth_status`               | Report the stored session and its auth mode                                   | None                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `create_transaction`              | Create a new transaction in Monarch Money                                     | `date`, `account_id`, `amount`, `merchant_name`, `category_id`, `notes`?, `update_balance`?                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -726,7 +776,7 @@ These tools mutate your Monarch data. The list is every registered tool that wri
 
 **Accounts**: `update_account`
 
-**Transactions**: `create_transaction`, `update_transaction`, `delete_transaction`, `categorize_transaction`, `update_transaction_notes`, `mark_transaction_reviewed`, `bulk_categorize_transactions`, `split_transaction`, `upload_account_balance_history`
+**Transactions**: `create_transaction`, `update_transaction`, `delete_transaction`, `categorize_transaction`, `update_transaction_notes`, `mark_transaction_reviewed`, `bulk_categorize_transactions`, `bulk_update_transactions`, `split_transaction`, `upload_account_balance_history`
 
 **Tags**: `set_transaction_tags`, `add_transaction_tag`, `create_transaction_tag`
 
@@ -744,7 +794,7 @@ These tools mutate your Monarch data. The list is every registered tool that wri
 
 Because the LLM can be influenced by data it reads back (a malicious-looking memo or merchant name in a transaction), the safest setup is to configure your MCP client to require manual approval before any mutating tool runs. In Claude Desktop and Claude Code this is the default behavior for unknown tools; keep it that way for the tools listed above rather than allow-listing them.
 
-`bulk_categorize_transactions`, `upload_account_balance_history`, `update_account` and `update_category` accept a `dry_run=True` argument that returns the planned changes without executing them, useful for previewing before approving.
+`bulk_categorize_transactions`, `bulk_update_transactions`, `upload_account_balance_history`, `update_account` and `update_category` accept a `dry_run=True` argument that returns the planned changes without executing them, useful for previewing before approving.
 
 `update_category` additionally requires `confirm_rollover_reset=True` before `rollover_start_month` or `rollover_starting_balance` will be applied. Those two restart a category's rollover period and discard the balance accumulated in it, which cannot be undone, so they cannot ride along unnoticed in a call that otherwise reads like a rename.
 
